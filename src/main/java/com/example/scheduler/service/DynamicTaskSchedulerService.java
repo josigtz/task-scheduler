@@ -223,10 +223,22 @@ public class DynamicTaskSchedulerService {
         List<TaskDefinition> activeTasks = taskDefinitionRepository.findByEnabledTrue();
         for (TaskDefinition task : activeTasks) {
             try {
+                ScheduledFuture<?> existingSchedule = scheduledTasks.get(task.getTaskId());
+                if (existingSchedule != null) {
+                    if (existingSchedule.isCancelled() || existingSchedule.isDone()) {
+                        scheduledTasks.remove(task.getTaskId());
+                        log.info("Task '{}' had stale schedule; re-initializing", task.getTaskId());
+                    } else {
+                        log.warn("Task '{}' is already scheduled; skipping initialization", task.getTaskId());
+                        continue;
+                    }
+                }
+
                 ScheduledFuture<?> scheduledFuture = taskScheduler.schedule(
                     () -> executeTask(task, "SCHEDULED", null, null),
                     new CronTrigger(task.getCronExpression())
                 );
+
                 scheduledTasks.put(task.getTaskId(), scheduledFuture);
                 log.info("Initialized scheduled task: {}", task.getTaskId());
             } catch (Exception e) {
