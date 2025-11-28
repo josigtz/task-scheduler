@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -225,7 +226,10 @@ public class DynamicTaskSchedulerService {
                         triggeredUser,
                         "Triggered by successful completion of " + parentTask.getTaskId()
                     );
-                    taskScheduler.execute(() -> executeTask(dependentTask, "DEPENDENCY", triggeredUser, parentExecution));
+                    taskScheduler.schedule(
+                        () -> executeTask(dependentTask, "DEPENDENCY", triggeredUser, parentExecution),
+                        Instant.now()
+                    );
                 }
             }
         }
