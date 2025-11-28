@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,13 @@ public class DynamicTaskSchedulerService {
     public void scheduleTask(TaskDefinition taskDef, User user) {
         try {
             if (scheduledTasks.containsKey(taskDef.getTaskId())) {
-                throw new IllegalStateException("Task already scheduled: " + taskDef.getTaskId());
+                ScheduledFuture<?> existing = scheduledTasks.get(taskDef.getTaskId());
+                if (existing != null && (existing.isCancelled() || existing.isDone())) {
+                    scheduledTasks.remove(taskDef.getTaskId());
+                    log.info("Removed stale schedule for task '{}' before rescheduling", taskDef.getTaskId());
+                } else {
+                    throw new IllegalStateException("Task already scheduled: " + taskDef.getTaskId());
+                }
             }
             
             // Validate script exists
@@ -212,7 +219,17 @@ public class DynamicTaskSchedulerService {
             for (TaskDefinition dependentTask : dependentTasks) {
                 if (dependentTask.isEnabled()) {
                     log.info("Triggering dependent task: {} (parent: {})", dependentTask.getTaskId(), parentTask.getTaskId());
-                    taskScheduler.execute(() -> executeTask(dependentTask, "DEPENDENCY", null, parentExecution));
+                    User triggeredUser = parentExecution != null ? parentExecution.getTriggeredByUser() : null;
+                    auditService.logAction(
+                        "DEPENDENCY_TRIGGERED",
+                        dependentTask.getTaskId(),
+                        triggeredUser,
+                        "Triggered by successful completion of " + parentTask.getTaskId()
+                    );
+                    taskScheduler.schedule(
+                        () -> executeTask(dependentTask, "DEPENDENCY", triggeredUser, parentExecution),
+                        Instant.now()
+                    );
                 }
             }
         }
