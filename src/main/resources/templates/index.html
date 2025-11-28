@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cron Shell Scheduler</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>🕒 Cron Shell Scheduler</h1>
+                <div class="header-actions">
+                    <button id="theme-toggle" class="btn-icon" title="Toggle Dark Mode">🌓</button>
+                    <span class="user-info">👤 <span sec:authentication="name">User</span></span>
+                    <a th:href="@{/audit}" class="btn btn-secondary">📋 Audit Logs</a>
+                    <form th:action="@{/logout}" method="post" style="display: inline;">
+                        <button type="submit" class="btn btn-secondary">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Alerts -->
+        <div th:if="${success}" class="alert alert-success" th:text="${success}"></div>
+        <div th:if="${error}" class="alert alert-error" th:text="${error}"></div>
+        
+        <!-- New Task Form -->
+        <div class="card">
+            <h2>📝 Schedule New Task</h2>
+            <form th:action="@{/schedule}" method="post" th:object="${newTask}">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="taskId">Task ID</label>
+                        <input type="text" id="taskId" th:field="*{taskId}" class="form-control" required 
+                               placeholder="my-backup-task">
+                        <div th:if="${#fields.hasErrors('taskId')}" class="error" th:errors="*{taskId}"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="scriptPath">Script Path</label>
+                        <input type="text" id="scriptPath" th:field="*{scriptPath}" class="form-control" required 
+                               placeholder="/path/to/script.sh">
+                        <div th:if="${#fields.hasErrors('scriptPath')}" class="error" th:errors="*{scriptPath}"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="cronExpression">Cron Expression</label>
+                        <input type="text" id="cronExpression" th:field="*{cronExpression}" class="form-control" required 
+                               placeholder="0 0 * * * *">
+                        <div th:if="${#fields.hasErrors('cronExpression')}" class="error" th:errors="*{cronExpression}"></div>
+                        <small class="help-text">Format: second minute hour day month weekday</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">Description</label>
+                        <input type="text" id="description" th:field="*{description}" class="form-control" 
+                               placeholder="Optional description">
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">📅 Schedule Task</button>
+            </form>
+        </div>
+        
+        <!-- Active Tasks -->
+        <div class="card">
+            <h2>⚡ Active Tasks</h2>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Task ID</th>
+                            <th>Script</th>
+                            <th>Schedule</th>
+                            <th>Status</th>
+                            <th>Created By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="task : ${tasks}">
+                            <td>
+                                <a th:href="@{/task/{id}(id=${task.taskId})}" th:text="${task.taskId}"></a>
+                            </td>
+                            <td><code th:text="${task.scriptPath}"></code></td>
+                            <td><code th:text="${task.cronExpression}"></code></td>
+                            <td>
+                                <span th:if="${task.scheduled}" class="badge badge-success">✅ Scheduled</span>
+                                <span th:if="${!task.scheduled && task.enabled}" class="badge badge-warning">⏸️ Not Scheduled</span>
+                                <span th:if="${!task.enabled}" class="badge badge-error">❌ Disabled</span>
+                            </td>
+                            <td th:text="${task.createdBy?.username}"></td>
+                            <td>
+                                <button th:onclick="'executeTask(\'' + ${task.taskId} + '\')'" 
+                                        class="btn btn-sm btn-secondary" title="Run Now">▶️</button>
+                                <button th:onclick="'openLiveTail(\'' + ${task.taskId} + '\')'" 
+                                        class="btn btn-sm btn-secondary" title="Live Output">📡</button>
+                                <form th:action="@{/cancel/{id}(id=${task.taskId})}" method="post" style="display: inline;">
+                                    <button type="submit" class="btn btn-sm btn-danger" 
+                                            th:if="${task.scheduled}" title="Cancel">❌</button>
+                                </form>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Recent Executions -->
+        <div class="card">
+            <h2>📊 Recent Executions</h2>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Started</th>
+                            <th>Duration</th>
+                            <th>Status</th>
+                            <th>Exit Code</th>
+                            <th>Triggered By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="exec : ${recentExecutions}">
+                            <td>
+                                <a th:href="@{/task/{id}(id=${exec.task.taskId})}" th:text="${exec.task.taskId}"></a>
+                            </td>
+                            <td th:text="${#temporals.format(exec.startTime, 'yyyy-MM-dd HH:mm:ss')}"></td>
+                            <td>
+                                <span th:if="${exec.executionTimeMs}" 
+                                      th:text="${exec.executionTimeMs < 1000 ? exec.executionTimeMs + 'ms' : (exec.executionTimeMs / 1000.0) + 's'}">
+                                </span>
+                            </td>
+                            <td>
+                                <span th:class="${'badge badge-' + (exec.status.name() == 'SUCCESS' ? 'success' : 
+                                               exec.status.name() == 'RUNNING' ? 'warning' : 'error')}"
+                                      th:text="${exec.status}"></span>
+                            </td>
+                            <td th:text="${exec.exitCode}"></td>
+                            <td>
+                                <span th:text="${exec.triggeredBy}"></span>
+                                <span th:if="${exec.triggeredByUser}" th:text="${'(' + exec.triggeredByUser.username + ')'}"></span>
+                            </td>
+                            <td>
+                                <button th:onclick="'viewExecutionDetails(' + ${exec.id} + ')'" 
+                                        class="btn btn-sm btn-secondary">View Output</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Live Output Modal -->
+    <div id="liveTailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📡 Live Output - <span id="liveTailTaskId"></span></h3>
+                <button onclick="closeLiveTail()" class="close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="liveTailOutput" class="console-output"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Execution Details Modal -->
+    <div id="executionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📋 Execution Details</h3>
+                <button onclick="closeExecutionModal()" class="close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="executionDetails"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script th:src="@{/js/app.js}"></script>
+</body>
+</html>

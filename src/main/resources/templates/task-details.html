@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.thymeleaf.org/extras/spring-security" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Details - [[${task.taskId}]]</title>
+    <link rel="stylesheet" th:href="@{/css/style.css}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>📋 Task Details: [[${task.taskId}]]</h1>
+                <div class="header-actions">
+                    <a th:href="@{/}" class="btn btn-secondary">← Back to Dashboard</a>
+                    <button id="theme-toggle" class="btn-icon" title="Toggle Dark Mode">🌓</button>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Task Information -->
+        <div class="card">
+            <h2>ℹ️ Task Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Task ID:</strong> [[${task.taskId}]]
+                </div>
+                <div class="info-item">
+                    <strong>Script Path:</strong> <code>[[${task.scriptPath}]]</code>
+                </div>
+                <div class="info-item">
+                    <strong>Cron Expression:</strong> <code>[[${task.cronExpression}]]</code>
+                </div>
+                <div class="info-item">
+                    <strong>Description:</strong> [[${task.description ?: 'N/A'}]]
+                </div>
+                <div class="info-item">
+                    <strong>Status:</strong> 
+                    <span th:if="${task.enabled}" class="badge badge-success">Enabled</span>
+                    <span th:unless="${task.enabled}" class="badge badge-error">Disabled</span>
+                </div>
+                <div class="info-item">
+                    <strong>Created By:</strong> [[${task.createdBy?.username}]] 
+                    on [[${#temporals.format(task.createdAt, 'yyyy-MM-dd HH:mm:ss')}]]
+                </div>
+                <div class="info-item">
+                    <strong>Last Modified:</strong> [[${task.modifiedBy?.username}]] 
+                    on [[${#temporals.format(task.lastModified, 'yyyy-MM-dd HH:mm:ss')}]]
+                </div>
+                <div class="info-item">
+                    <strong>Timeout:</strong> [[${task.timeoutSeconds}]] seconds
+                </div>
+                <div class="info-item">
+                    <strong>Max Retries:</strong> [[${task.maxRetries}]]
+                </div>
+            </div>
+        </div>
+        
+        <!-- Task Dependencies -->
+        <div class="card">
+            <h2>🔗 Task Dependencies</h2>
+            <p>Tasks that will be triggered when this task completes successfully:</p>
+            
+            <form th:action="@{/task/{id}/dependencies(id=${task.taskId})}" method="post">
+                <div class="form-group">
+                    <label for="dependencies">Select Dependent Tasks:</label>
+                    <select id="dependencies" name="dependentTaskIds" class="form-control" multiple size="5">
+                        <option th:each="depTask : ${allTasks}" 
+                                th:if="${depTask.taskId != task.taskId}"
+                                th:value="${depTask.taskId}"
+                                th:text="${depTask.taskId + ' - ' + (depTask.description ?: depTask.scriptPath)}"
+                                th:selected="${task.dependentTasks.contains(depTask)}">
+                        </option>
+                    </select>
+                    <small class="help-text">Hold Ctrl/Cmd to select multiple tasks</small>
+                </div>
+                <button type="submit" class="btn btn-primary">Update Dependencies</button>
+            </form>
+            
+            <div th:if="${!task.dependentTasks.isEmpty()}" class="mt-3">
+                <h4>Current Dependencies:</h4>
+                <ul>
+                    <li th:each="dep : ${task.dependentTasks}">
+                        <a th:href="@{/task/{id}(id=${dep.taskId})}" th:text="${dep.taskId}"></a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Execution History -->
+        <div class="card">
+            <h2>📊 Execution History</h2>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Started</th>
+                            <th>Ended</th>
+                            <th>Duration</th>
+                            <th>Status</th>
+                            <th>Exit Code</th>
+                            <th>Triggered By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="exec : ${executions}">
+                            <td th:text="${exec.id}"></td>
+                            <td th:text="${#temporals.format(exec.startTime, 'yyyy-MM-dd HH:mm:ss')}"></td>
+                            <td th:text="${exec.endTime ? #temporals.format(exec.endTime, 'yyyy-MM-dd HH:mm:ss') : 'Running...'}"></td>
+                            <td>
+                                <span th:if="${exec.executionTimeMs}" 
+                                      th:text="${exec.executionTimeMs < 1000 ? exec.executionTimeMs + 'ms' : (exec.executionTimeMs / 1000.0) + 's'}">
+                                </span>
+                            </td>
+                            <td>
+                                <span th:class="${'badge badge-' + (exec.status.name() == 'SUCCESS' ? 'success' : 
+                                               exec.status.name() == 'RUNNING' ? 'warning' : 'error')}"
+                                      th:text="${exec.status}"></span>
+                            </td>
+                            <td th:text="${exec.exitCode}"></td>
+                            <td>
+                                <span th:text="${exec.triggeredBy}"></span>
+                                <span th:if="${exec.triggeredByUser}" th:text="${'(' + exec.triggeredByUser.username + ')'}"></span>
+                            </td>
+                            <td>
+                                <button th:onclick="'viewExecutionDetails(' + ${exec.id} + ')'" 
+                                        class="btn btn-sm btn-secondary">View Output</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Audit Logs -->
+        <div class="card">
+            <h2>📝 Audit Logs</h2>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Action</th>
+                            <th>User</th>
+                            <th>Details</th>
+                            <th>IP Address</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="audit : ${auditLogs}">
+                            <td th:text="${#temporals.format(audit.timestamp, 'yyyy-MM-dd HH:mm:ss')}"></td>
+                            <td th:text="${audit.action}"></td>
+                            <td th:text="${audit.user?.username}"></td>
+                            <td th:text="${audit.details}"></td>
+                            <td th:text="${audit.ipAddress}"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Execution Details Modal -->
+    <div id="executionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📋 Execution Details</h3>
+                <button onclick="closeExecutionModal()" class="close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="executionDetails"></div>
+            </div>
+        </div>
+    </div>
+    
+    <script th:src="@{/js/app.js}"></script>
+</body>
+</html>
